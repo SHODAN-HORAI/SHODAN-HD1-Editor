@@ -1,7 +1,7 @@
 # SHODAN FGW Editor
 
 Change the stats of weapons, grenades, backpacks, stratagems, sentries, mines, strikes, vehicles,
-enemies, status effects and your Helldiver in **Helldivers** (the first one, the First Galactic War).
+enemies, status effects and your Helldiver in **Helldivers** (the first one).
 Press **F7** in game, pick an item, change its numbers, and the change applies at once. Your changes
 stay for the next launch.
 
@@ -11,7 +11,7 @@ stay for the next launch.
 
 ## What you can do
 
-- **Edit stats live**: every value, per item, with - / + buttons, the arrow keys, or by typing a number.
+- **Edit stats live**: every value, per item.
 - **Attachments**: turn each weapon's armory upgrades on and off, bought or not. Your save is left as it is.
 - **Presets**: 5 per item, and up to 50 named presets in the Presets tab for everything you have changed.
 - **Settings**: turn all your changes off and on again, pick how see-through the window is, hide the key hints, and hide tabs you don't use.
