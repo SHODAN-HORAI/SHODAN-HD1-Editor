@@ -5,7 +5,7 @@ enemies, status effects and your Helldiver in **Helldivers** (the first one).
 Press **F7** in game, pick an item, change its numbers, and the change applies at once. Your changes
 stay for the next launch.
 
-**[Download the latest release](../../releases/latest)** Â· Nothing else needed
+**[Download the latest release](../../releases/latest)**· Nothing else needed
 
 ![SHODAN HD1 Editor](images/window.jpg)
 
