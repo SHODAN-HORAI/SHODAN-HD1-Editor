@@ -45,6 +45,32 @@ local CHARACTER = {
 }
 for _, f in ipairs(CHARACTER) do f.family, f.type = "character", "number" end
 
+-- Fields the game has that the API doesn't list, by family. A row shows only where the item has the
+-- value (opt ones everywhere), and a path the API already lists is skipped.
+local RELOAD = {
+	{ path = "weapon_info.reload_duration", label = "Reload time (empty)", min = 0.05, max = 30, apply = "live" },
+	{ path = "weapon_info.reload_duration_fast", label = "Reload time (tactical)", min = 0.05, max = 30, apply = "live", meaning = "With rounds left in the magazine" },
+	{ path = "weapon_info.reload_duration_assisted", label = "Reload time (assisted)", min = 0.05, max = 30, apply = "live", meaning = "When a teammate loads it" },
+	{ path = "weapon_info.magazines", label = "Spare magazines", min = 0, max = 255, apply = "spawn", meaning = "Carried at the start, and added by an ammo pickup" },
+}
+local EXTRA = {
+	launcher = {},
+}
+for _, f in ipairs(RELOAD) do EXTRA.launcher[#EXTRA.launcher + 1] = f end
+for name, list in pairs(EXTRA) do
+	for _, f in ipairs(list) do f.family, f.type = name, f.type or "number" end
+end
+
+-- The API's fields of a family and ours, without repeats.
+local function fields_of(name)
+	local out, have = {}, {}
+	for _, f in ipairs(catalog.fields(name)) do out[#out + 1] = f have[f.path] = true end
+	for _, f in ipairs(EXTRA[name] or {}) do
+		if not have[f.path] then out[#out + 1] = f have[f.path] = true end
+	end
+	return out
+end
+
 local GRENADES = {
 	{ "Frag grenade", "equipment/equipment_grenade_01" }, { "Incendiary grenade", "equipment/equipment_grenade_incendiary" },
 	{ "Stun grenade", "equipment/equipment_grenade_stun" }, { "Smoke grenade", "equipment/equipment_grenade_smoke" },
@@ -136,6 +162,28 @@ local function settings_of(unit)
 	return nil
 end
 
+-- A launcher's damage is in the explosion of the projectile it fires, which has its own settings path.
+-- Missiles (gameobjects/...) have no settings path, only a table found by unit path, so they're edited
+-- as a table kept under "proj:<unit path>". A gun's shot is in weapon_info, an exosuit's missiles in
+-- exosuit_info. Each: { key the edits go under, header, item, table }.
+local function projectiles_of(st, name)
+	local out, seen = {}, {}
+	local function add(t, suffix)
+		for _, src in ipairs({ { "weapon_info", "Projectile" }, { "exosuit_info", "Missiles" } }) do
+			local proj = type(t) == "table" and type(t[src[1]]) == "table" and t[src[1]].projectile
+			local psp, pst = settings_of(type(proj) == "string" and proj or nil)
+			local key = psp or (proj and "proj:" .. proj)
+			if pst and pst.explosive_info and not seen[key] then
+				seen[key] = true
+				local item = psp and { kind = "unit", key = psp, name = name } or { kind = "proj", unit = proj, name = name }
+				out[#out + 1] = { key = key, header = src[2] .. suffix, item = item, st = pst }
+			end
+		end
+	end
+	add(st, "")
+	return out
+end
+
 local function is_int(v) return type(v) == "number" and v == math.floor(v) end
 
 local function step_of(f, v)
@@ -156,6 +204,13 @@ local function bind(item, f)
 		r.changed = function() return (edits.original(sp, f.path)) end
 		r.reset = function() return edits.revert_where(sp, f.path) end
 		r.set = function(v) return edits.set_unit(sp, f.path, v, opts) end
+	elseif item.kind == "proj" then
+		local _, t = settings_of(item.unit)
+		opts.keep = "proj:" .. item.unit
+		r.get = function() return edits.table_value(t, f.path) end
+		r.changed = function() return edits.table_changed(t, f.path) end
+		r.reset = function() return edits.revert_table(t, f.path) end
+		r.set = function(v) return edits.set_table(item.name, t, f.path, v, opts) end
 	elseif item.kind == "strat" then
 		local s = catalog.stratagem(item.id)
 		r.get = function() return edits.table_value(s, f.path) end
@@ -236,10 +291,10 @@ end
 local function rows_of(item)
 	if item.kind == "preset" then return {} end
 	local out = {}
-	local function family(name, fields)
+	local function family(name, fields, owner)
 		local start = #out
 		out[#out + 1] = { header = FAMILY[name] or name }
-		for _, f in ipairs(fields) do out[#out + 1] = bind(item, f) end
+		for _, f in ipairs(fields) do out[#out + 1] = bind(owner or item, f) end
 		if #out == start + 1 then out[#out] = nil end
 	end
 	if item.kind == "unit" then
@@ -250,7 +305,8 @@ local function rows_of(item)
 			out[#out + 1] = { header = "Attachments" }
 			for _, r in ipairs(attachment_rows(item, info)) do out[#out + 1] = r end
 		end
-		for _, name in ipairs(catalog.families_of(st)) do family(name, catalog.fields(name)) end
+		for _, name in ipairs(catalog.families_of(st)) do family(name, fields_of(name)) end
+		for _, p in ipairs(projectiles_of(st, item.name)) do family(p.header, fields_of("explosive"), p.item) end
 	elseif item.kind == "hero" then
 		if edits.value(HELLDIVER, "health_info.health") == nil then return nil end
 		family("character", CHARACTER)
@@ -337,6 +393,11 @@ local function restore(where, path, value)
 	end
 	local kind, name = string.match(where, "^(%a+):(.+)$")
 	if kind == "stratagem" then return api.stratagems.edit(name, path, value) end
+	if kind == "proj" then
+		local _, t = settings_of(name)
+		if not t then return false, "no_target" end
+		return edits.set_table(name, t, path, value, { keep = where, new = true })
+	end
 	if kind == "status" then
 		local t = global("StatusTemplateSettings")[name]
 		if not t then return false, "no_target" end
@@ -436,7 +497,7 @@ local function item_lines(item)
 	local out = {}
 	for line in string.gmatch(encode(), "[^\n]+") do
 		local where, path = string.match(line, "^([^|]+)|([^|]+)|")
-		if where == item.key or (where == "att" and path == item.unit) then out[#out + 1] = line end
+		if where == item.key or (item.projs and item.projs[where]) or (where == "att" and path == item.unit) then out[#out + 1] = line end
 	end
 	return table.concat(out, "\n")
 end
@@ -508,7 +569,11 @@ local function load_tab(n)
 	local ok, list = pcall(TABS[n][2])
 	S.items = ok and list or {}
 	for _, it in ipairs(S.items) do
-		if it.kind == "unit" then it.key = settings_of(it.unit)
+		if it.kind == "unit" then
+			local st
+			it.key, st = settings_of(it.unit)
+			it.projs = {}
+			for _, p in ipairs(projectiles_of(st)) do it.projs[p.key] = true end
 		elseif it.kind == "hero" then it.key = HELLDIVER
 		elseif it.kind == "preset" then it.key = nil
 		elseif it.kind == "strat" then it.key = "stratagem:" .. it.id
@@ -1038,6 +1103,7 @@ local function draw_list(x, y, w, h)
 			if it == S.pick then rect(x, ry, w - 8, ROW_H - 1, PICKED)
 			elseif S.hover == id then rect(x, ry, w - 8, ROW_H - 1, HOVER) end
 			local edited = it.key and S.changed[it.key]
+			for k in pairs(it.projs or {}) do edited = edited or S.changed[k] end
 			text((edited and "* " or "") .. it.name, x + 6, ry + ROW_H / 2, 15, edited and GOLD or WHITE)
 			if it.count then text(it.count .. " value(s)", x + w - 16, ry + ROW_H / 2, 13, MUTED, "right") end
 			hit(id, x, ry, w - 8, ROW_H - 1, function() pick(it) end)
