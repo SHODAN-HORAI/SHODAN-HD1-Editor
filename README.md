@@ -34,7 +34,7 @@ mods running. Every time you deploy again, the editor stops opening until you ru
 
 ### Mod Manager (Obsidian Mod Manager)
 
-1. Download `shodan.hd1editor-mod-manager-<version>.zip` from the [latest release](../../releases/latest).
+1. Download `shodan.hd1editor-obsidian-<version>.zip` from the [latest release](../../releases/latest).
 2. In Obsidian Mod Manager, press the green **+** on the Mods tab, or drop the zip on the list.
 3. Turn it on, press Deploy, then start Helldivers and press **F7**.
 
