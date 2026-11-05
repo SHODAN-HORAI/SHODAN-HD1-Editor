@@ -197,8 +197,9 @@ end
 -- A launcher's damage is in the explosion of the projectile it fires, which has its own settings path.
 -- Missiles (gameobjects/...) have no settings path, only a table found by unit path, so they're edited
 -- as a table kept under "proj:<unit path>". A gun's shot is in weapon_info, an exosuit's missiles in
--- exosuit_info. Each: { key the edits go under, header, item, table }.
-local function projectiles_of(st, name)
+-- exosuit_info, and an upgrade can swap either for another (incendiary rounds). Each: { key the edits
+-- go under, header, item, table }.
+local function projectiles_of(st, name, upgrades)
 	local out, seen = {}, {}
 	local function add(t, suffix)
 		for _, src in ipairs({ { "weapon_info", "Projectile" }, { "exosuit_info", "Missiles" } }) do
@@ -213,6 +214,12 @@ local function projectiles_of(st, name)
 		end
 	end
 	add(st, "")
+	local info = st and st.upgrade_info
+	for i, u in ipairs(type(info) == "table" and info or {}) do
+		local up = upgrades and upgrades[i]
+		local title = up and up.upgrade_name and catalog.text(up.upgrade_name) or ("Upgrade " .. i)
+		add(u, " (" .. title .. ")")
+	end
 	return out
 end
 
@@ -355,7 +362,7 @@ local function rows_of(item)
 			for _, r in ipairs(attachment_rows(item, info)) do out[#out + 1] = r end
 		end
 		for _, name in ipairs(catalog.families_of(st)) do family(name, fields_of(name)) end
-		local projs = projectiles_of(st, item.name)
+		local projs = projectiles_of(st, item.name, item.upgrades)
 		for _, p in ipairs(projs) do family(p.header, fields_of("explosive"), p.item) end
 		-- Status effects are one table per effect, shared by everything that applies it: the game tracks
 		-- them in a fixed list, so a weapon can't have its own copy.
