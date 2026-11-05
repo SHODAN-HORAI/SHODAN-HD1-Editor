@@ -112,7 +112,8 @@ local function units(list, extra)
 	local out = {}
 	-- save: the name the save keeps the item's upgrades under. A pack's are its stratagem's.
 	for _, it in ipairs(list) do
-		out[#out + 1] = { kind = "unit", name = catalog.text(it.name), unit = it.unit_path, save = it.stratagem or it.name, upgrades = it.upgrades }
+		local strat = not it.upgrades and catalog.stratagem(it.name)
+		out[#out + 1] = { kind = "unit", name = catalog.text(it.name), unit = it.unit_path, save = it.stratagem or it.name, upgrades = it.upgrades or strat and strat.upgrades, strat = strat and it.name }
 	end
 	for _, e in ipairs(extra or {}) do out[#out + 1] = { kind = "unit", name = e[1], unit = e[2] } end
 	return out
@@ -289,6 +290,36 @@ local function set_att(path, value, own)
 	return true
 end
 
+-- Stratagem upgrades (Mk2, Mk3) are levels: the game applies upgrade 1 to n, to the stratagem through
+-- LoadoutSettings.get_upgraded_stratagem and to its units (a support weapon, a turret) through
+-- get_modified_settings. The choice here is a bitmask kept as att "strat:<name>", and the hooks at the
+-- end build the mix it names, so any upgrade can be on or off alone.
+local function upgrade_rows(name, names)
+	local out, key = {}, "strat:" .. name
+	local function own() return 2 ^ math.min(owned({ save = name }), #names) - 1 end
+	local function value() return S.att[key] or own() end
+	for i = 1, math.min(#names, 4) do
+		local bit = 2 ^ (i - 1)
+		local function has(m) return math.floor(m / bit) % 2 == 1 end
+		local up = names[i] or {}
+		local title = up.upgrade_name and catalog.text(up.upgrade_name) or ("Upgrade " .. i)
+		local r = { label = title, f = { type = "boolean", apply = "reload", label = title }, step = 1 }
+		r.get = function() return has(value()) end
+		r.changed = function() return has(value()) ~= has(own()) end
+		r.set = function(on)
+			local m = value()
+			if has(m) ~= on then m = on and m + bit or m - bit end
+			return set_att(key, m, own())
+		end
+		r.reset = function() return r.set(has(own())) end
+		local about = up.upgrade_description and catalog.text(up.upgrade_description) or ""
+		if about ~= "" then about = (string.find(about, "[%.!?]%s*$") and about or about .. ".") .. " " end
+		r.help = about .. (has(own()) and "Bought in the armory." or "Not bought in the armory.") .. " Weapons: at once. The stratagem itself: next mission or respawn."
+		out[#out + 1] = r
+	end
+	return out
+end
+
 local function attachment_rows(item, info)
 	local path, out, names = item.unit, {}, item.upgrades or {}
 	local function value() return S.att[path] or owned(item) end
@@ -313,6 +344,12 @@ local function attachment_rows(item, info)
 			r.help = about .. (has(owned(item)) and "Bought in the armory." or "Not bought in the armory.") .. " Applies at once."
 			out[#out + 1] = r
 		end
+	elseif item.strat then
+		-- A level kept by the old Upgrade level row becomes the same upgrades, on the toggles.
+		local key = "strat:" .. item.strat
+		if S.att[path] and not S.att[key] then S.att[key] = 2 ^ math.min(S.att[path], #names) - 1 end
+		S.att[path] = nil
+		return upgrade_rows(item.strat, names)
 	else
 		local top = math.min(#info, 15)
 		local r = { label = "Upgrade level", f = { type = "number", min = 0, max = top, apply = "reload", label = "Upgrade level" }, step = 1 }
@@ -381,7 +418,12 @@ local function rows_of(item)
 		if edits.value(HELLDIVER, "health_info.health") == nil then return nil end
 		family("character", CHARACTER)
 	elseif item.kind == "strat" then
-		if not catalog.stratagem(item.id) then return nil end
+		local strat = catalog.stratagem(item.id)
+		if not strat then return nil end
+		if type(strat.upgrades) == "table" and #strat.upgrades > 0 then
+			out[#out + 1] = { header = "Upgrades" }
+			for _, r in ipairs(upgrade_rows(item.id, strat.upgrades)) do out[#out + 1] = r end
+		end
 		family("stratagem", catalog.fields("stratagem"))
 	else
 		local t = global("StatusTemplateSettings")
@@ -417,8 +459,11 @@ local function write(r, v)
 	end
 	local ok, why = r.set(v)
 	if not ok then return toast("Not changed: " .. tostring(why)) end
-	-- Weapons in hand keep copies of some stats: this pushes the change into them.
-	if r.f.apply == "reload" then pcall(api.gear.refresh) end
+	-- Weapons in hand keep copies of some stats: this pushes the change into them. A weapon on an
+	-- upgrade mix holds a copy of everything, so with one about every change does.
+	local mixed = false
+	for k in pairs(S.att) do mixed = mixed or string.find(k, "^strat:") ~= nil end
+	if r.f.apply == "reload" or mixed then pcall(api.gear.refresh) end
 	S.dirty = SAVE_AFTER
 end
 
@@ -567,7 +612,7 @@ local function item_lines(item)
 	local out = {}
 	for line in string.gmatch(encode(), "[^\n]+") do
 		local where, path = string.match(line, "^([^|]+)|([^|]+)|")
-		if where == item.key or (item.projs and item.projs[where]) or (where == "att" and path == item.unit) then out[#out + 1] = line end
+		if where == item.key or (item.projs and item.projs[where]) or (where == "att" and (path == item.unit or path == "strat:" .. tostring(item.strat or item.kind == "strat" and item.id))) then out[#out + 1] = line end
 	end
 	return table.concat(out, "\n")
 end
@@ -1472,6 +1517,11 @@ local function frame()
 		S.count = S.count + 1
 	end
 	for path in pairs(S.att) do
+		local name = string.match(path, "^strat:(.+)$")
+		if name then
+			S.changed["stratagem:" .. name] = true
+			for _, it in ipairs(S.items or {}) do if it.strat == name and it.key then S.changed[it.key] = true end end
+		end
 		S.changed[settings_of(path) or path] = true
 		S.count = S.count + 1
 	end
@@ -1506,6 +1556,35 @@ fgw.on_frame(function()
 	end
 end)
 
+local function raw_table(t) return rawget(t, "__protected_table") or t end
+
+-- The units a stratagem's upgrades reach: its support weapon and the unit it calls in. Built once.
+local strat_of
+local function strat_mix(path)
+	if not strat_of then
+		local map = {}
+		for _, w in ipairs(catalog.support_weapons()) do map[w.unit_path] = w.name end
+		for _, st in ipairs(catalog.stratagems()) do
+			if type(st.unit) == "string" and not map[st.unit] then map[st.unit] = st.name end
+		end
+		-- Before the game has loaded its stratagems there's nothing to map yet.
+		if next(map) == nil then return nil end
+		strat_of = map
+	end
+	local name = strat_of[path]
+	local mask = name and S.att["strat:" .. name]
+	if not mask then return nil end
+	local base = global("LuaSettingsManager"):get_settings_by_unit_path(path)
+	local info = base and base.upgrade_info
+	if type(info) ~= "table" or info.type == "bitmask" then return nil end
+	-- A fresh table per call: edits made since are in the base, and a refresh hands them over.
+	local t = table.clone(raw_table(base))
+	for i, up in ipairs(info) do
+		if math.floor(mask / 2 ^ (i - 1)) % 2 == 1 then global("SettingsAux").recursive_override(t, up) end
+	end
+	return t
+end
+
 -- The attachments chosen here, for every weapon of that unit path. unit: a unit or a unit path.
 fgw.hook("LuaSettingsManager", "get_modified_settings", function(original, self, unit, value, ...)
 	if next(S.att) ~= nil then
@@ -1516,8 +1595,21 @@ fgw.hook("LuaSettingsManager", "get_modified_settings", function(original, self,
 		end
 		local want = path and S.att[path]
 		if want then value = want end
+		local mix = path and not want and strat_mix(path)
+		if mix then return mix end
 	end
 	return original(self, unit, value, ...)
+end)
+
+fgw.hook("LoadoutSettings", "get_upgraded_stratagem", function(original, name, level, ...)
+	local base = original(name, 0, ...)
+	local mask = type(base) == "table" and type(base.upgrades) == "table" and S.att["strat:" .. tostring(base.name)]
+	if not mask then return original(name, level, ...) end
+	local t = table.clone(raw_table(base))
+	for i, up in ipairs(base.upgrades) do
+		if math.floor(mask / 2 ^ (i - 1)) % 2 == 1 then global("SettingsAux").recursive_override(t, up) end
+	end
+	return t
 end)
 
 fgw.keybind("open", function()
