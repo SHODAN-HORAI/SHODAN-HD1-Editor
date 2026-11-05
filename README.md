@@ -32,7 +32,7 @@ game update may too. Run `Install.bat` again after one.
 If you also use a mod manager, deploy your mods there first, then run `Install.bat`. The editor keeps those
 mods running. Every time you deploy again, the editor stops opening until you run `Install.bat` again.
 
-### Mod Manager (Obsidian Mod Manager)
+### Obsidian Mod Manager
 
 1. Download `shodan.hd1editor-obsidian-<version>.zip` from the [latest release](../../releases/latest).
 2. In Obsidian Mod Manager, press the green **+** on the Mods tab, or drop the zip on the list.
@@ -66,7 +66,7 @@ old save is backed up first.
 - Leaderboard scores aren't sent while the editor is installed. The standalone version still sends Galactic War progress. Obsidian Mod Manager holds that back too while a mod like this one is on.
 - Some values apply at once, others on the next call-in, spawn or mission. The line under the stats says which.
 - An item whose data the game hasn't loaded on the current screen says so. Open it on the ship or in a mission.
-- The standalone version keeps your edits and presets in `%LOCALAPPDATA%\SHODAN\SHD1Editor`. The Mod Manager version keeps its own.
+- The standalone version keeps your edits and presets in `%LOCALAPPDATA%\SHODAN\SHD1Editor`. The Obsidian Mod Manager version keeps its own.
 - Works with other mods (see Install for mod managers).
 - Made for solo play.
 
