@@ -109,7 +109,7 @@ local TABS = {
 }
 local PRESETS_TAB = #TABS
 
-local VERSION = "0.1.0"
+local VERSION = "0.2.0"
 local GITHUB = "https://github.com/SHODAN-HORAI/SHODAN-HD1-Editor"
 -- Settings page choices: changes off puts the game's values back and keeps yours for when it's on again.
 local BACKGROUNDS = { { "Solid", 252 }, { "Dark", 242 }, { "Medium", 210 }, { "Light", 170 } }
@@ -589,6 +589,33 @@ local function setting(label, help, f, get, set, default)
 	return r
 end
 
+-- The key that opens the window: any keyboard key, caught by "Change" then a press. Kept as the
+-- game's own key name ("f7"), which the runtime's keybind reads from storage.
+local function open_key_name() return fgw.storage.get("key.open", "f7") end
+local function key_label(name) return (name:gsub("(%a)(%w*)", function(a, r) return a:upper() .. r end)) end
+
+-- The key pressed this frame, by the game's name for it. Esc is left out: it cancels.
+local function pressed_key()
+	local kb = global("Keyboard")
+	local n = kb.num_buttons and kb.num_buttons() or 256
+	for i = 0, n - 1 do
+		local ok, down = pcall(kb.pressed, i)
+		if ok and down == true then
+			local ok2, name = pcall(kb.button_name, i)
+			if ok2 and type(name) == "string" and name ~= "" then return name end
+		end
+	end
+end
+
+local function read_capture()
+	local name = pressed_key()
+	if not name then return end
+	S.capture = nil
+	if name == "esc" or name == "escape" then return toast("Open key not changed") end
+	-- Written a frame later, so this same press doesn't also close the window.
+	S.capture_set = name
+end
+
 local function settings_rows()
 	local names = {}
 	for i, b in ipairs(BACKGROUNDS) do names[i] = b[1] end
@@ -601,6 +628,11 @@ local function settings_rows()
 			function() return S.cfg.bg end, function(v) S.cfg.bg = v end, DEFAULTS.bg),
 		setting("Key hints", "The line of keys at the bottom of the window.", { type = "boolean" },
 			function() return S.cfg.hints end, function(v) S.cfg.hints = v end, DEFAULTS.hints),
+		{ label = "Open key", note = function() return S.capture and "Press a key (Esc: cancel)" or key_label(open_key_name()) end,
+			help = "The key that opens and closes this window. Click Change, then press any key.",
+			f = { type = "action", label = "Open key" }, setting = true, get = function() end, changed = function() return open_key_name() ~= "f7" end,
+			reset = function() fgw.storage.set("key.open", "f7") end,
+			buttons = { { "Change", function() S.capture = true end }, { "F7", function() fgw.storage.set("key.open", "f7") end } } },
 		{ header = "Updates" },
 		setting("Updates", "Ask: an Update button shows at the top when there's a new version. Automatic: it downloads by itself. Either way it goes in when you close the game.",
 			{ type = "choice", choices = { "Ask", "Automatic" }, buttons = true }, function() return S.cfg.updates end,
@@ -1139,7 +1171,7 @@ local function draw_rows(x, y, w, h)
 			clip(x, ry, vx - x - 90, ROW_H, function() text(r.label, x + 6, ry + ROW_H / 2, 15, WHITE) end)
 			local typing = S.typing and S.typing.row == r
 			if r.f.type == "action" then
-				text(r.note, vx, ry + ROW_H / 2, 15, MUTED, "right")
+				text(type(r.note) == "function" and r.note() or r.note, vx, ry + ROW_H / 2, 15, S.capture and r.label == "Open key" and GOLD or MUTED, "right")
 			elseif typing then
 				rect(vx - 80, ry + 1, 84, ROW_H - 3, SUNK)
 				outline(vx - 80, ry + 1, 84, ROW_H - 3, GOLD)
@@ -1301,7 +1333,12 @@ local function frame()
 		S.changed[settings_of(path) or path] = true
 		S.count = S.count + 1
 	end
-	if S.typing then read_typing() else keys(dt) end
+	if S.capture_set then
+		fgw.storage.set("key.open", S.capture_set)
+		toast("Open key: " .. key_label(S.capture_set))
+		S.capture_set = nil
+	end
+	if S.capture then read_capture() elseif S.typing then read_typing() else keys(dt) end
 	if not S.open then return end
 	mouse()
 	if not S.open then return end
@@ -1342,6 +1379,7 @@ fgw.hook("LuaSettingsManager", "get_modified_settings", function(original, self,
 end)
 
 fgw.keybind("open", function()
+	if S.capture or S.capture_set then return end
 	if S.open then close() else open() end
 end)
 

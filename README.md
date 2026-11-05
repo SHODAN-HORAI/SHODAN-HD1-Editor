@@ -25,11 +25,18 @@ stay for the next launch.
 To take it out, double-click `Uninstall.bat`. Verifying the game files in Steam also takes it out, and a
 game update may too: run `Install.bat` again after one.
 
+## Unlock everything
+
+`Unlock Everything.bat` is a separate tool in the same zip. It works without the editor installed. Close the game and
+double-click it: every weapon, stratagem, perk, armor and upgrade you can earn is unlocked in your save. Your rank
+and XP stay as they are. Paid DLC stays locked unless you own it, and the DLC you own gets its upgrades too. Your
+old save is backed up first.
+
 ## Keys
 
 | Key | What it does |
 |---|---|
-| F7 | Open or close the window |
+| F7 | Open or close the window (pick another key in Settings) |
 | Up / Down | Choose a stat |
 | Left / Right | Change it (hold Shift for bigger steps) |
 | Enter | Type a value |
