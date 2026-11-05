@@ -25,6 +25,9 @@ stay for the next launch.
 To take it out, double-click `Uninstall.bat`. Verifying the game files in Steam also takes it out, and a
 game update may too: run `Install.bat` again after one.
 
+Using a mod manager such as Obsidian Mod Manager? Deploy your mods there first, then run `Install.bat`. The
+editor keeps those mods running. Every time you deploy again, the editor stops opening: run `Install.bat` again.
+
 ## Unlock everything
 
 `Unlock Everything.bat` is a separate tool in the same zip. It works without the editor installed. Close the game and
@@ -51,7 +54,7 @@ old save is backed up first.
 - Some values apply at once, others on the next call-in, spawn or mission. The line under the stats says which.
 - An item whose data the game hasn't loaded on the current screen says so. Open it on the ship or in a mission.
 - Your edits and presets are kept in `%LOCALAPPDATA%\SHODAN\SHD1Editor`.
-- Works with other mods. If another mod tool installed first, the editor keeps its mods running. A mod tool installed after it may replace the editor: run `Install.bat` again.
+- Works with other mods (see Install for mod managers).
 - Made for solo play.
 
 ## License
