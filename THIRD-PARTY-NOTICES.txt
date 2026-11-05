@@ -1,4 +1,4 @@
-SHODAN FGW Editor uses game code adapted from this MIT-licensed work:
+SHODAN HD1 Editor uses game code adapted from this MIT-licensed work:
 
 MIT License
 

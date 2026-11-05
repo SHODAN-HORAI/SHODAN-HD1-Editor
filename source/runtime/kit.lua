@@ -1,4 +1,4 @@
--- Drawing for SHODAN FGW Editor: rectangles and text on one immediate gui on the brightness world, the
+-- Drawing for SHODAN HD1 Editor: rectangles and text on one immediate gui on the brightness world, the
 -- only world that lives through every state change. Coordinates are a design space (frame(w, h)),
 -- scaled to fit the window and centred, y going up from the bottom left as the engine's does.
 local G = _G

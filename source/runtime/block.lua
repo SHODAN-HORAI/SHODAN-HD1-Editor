@@ -1,4 +1,4 @@
--- No leaderboard reporting while SHODAN FGW Editor is installed: edited missions stay off the boards,
+-- No leaderboard reporting while SHODAN HD1 Editor is installed: edited missions stay off the boards,
 -- Proving Grounds' included. Galactic War progress is sent as usual.
 -- A blocked call is never sent, and every table handed to it is emptied: the ship menu saves that same
 -- table back as the upload queue, so it can't go out later either.

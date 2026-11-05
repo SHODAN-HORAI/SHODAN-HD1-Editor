@@ -1,4 +1,4 @@
--- SHODAN FGW Editor for HELLDIVERS: every stat, in one window, changed live.
+-- SHODAN HD1 Editor for HELLDIVERS: every stat, in one window, changed live.
 -- Edits go through api.edits (type and range checked, undoable). They're kept for the next launch and
 -- in five presets, as lines of "where|path|type|value" in this mod's storage.
 local api = fgw.import("api")
@@ -110,12 +110,13 @@ local TABS = {
 local PRESETS_TAB = #TABS
 
 local VERSION = "0.1.0"
+local GITHUB = "https://github.com/SHODAN-HORAI/SHODAN-HD1-Editor"
 -- Settings page choices: changes off puts the game's values back and keeps yours for when it's on again.
 local BACKGROUNDS = { { "Solid", 252 }, { "Dark", 242 }, { "Medium", 210 }, { "Light", 170 } }
-local DEFAULTS = { changes = true, bg = 2, hints = true }
+local DEFAULTS = { changes = true, bg = 2, hints = true, updates = 1, channel = 1 }
 
 local S = {
-	cfg = { changes = true, bg = 2, hints = true, hidden = {} }, settings = false,
+	cfg = { changes = true, bg = 2, hints = true, updates = 1, channel = 1, hidden = {} }, settings = false,
 	open = false, tab = 1, items = {}, shown = {}, pick = nil, rows = {}, row = 1, list_top = 1, row_top = 1, follow = true,
 	search = "", typing = nil, slot = 1, hits = {}, next_hits = {}, hover = nil, keys = {}, dirty = nil, changed = {}, count = 0,
 	-- Attachments: unit path -> the upgrade value its weapons use instead of the save's.
@@ -279,6 +280,15 @@ end
 
 local function write(r, v)
 	if not r.setting and off_note() then return end
+	-- Back to the game's own value: that's no change, so it's undone rather than kept as an edit.
+	if not r.setting and r.changed() then
+		r.reset()
+		if r.get() == v then
+			if r.f.apply == "reload" then pcall(api.gear.refresh) end
+			S.dirty = SAVE_AFTER
+			return
+		end
+	end
 	local ok, why = r.set(v)
 	if not ok then return toast("Not changed: " .. tostring(why)) end
 	-- Weapons in hand keep copies of some stats: this pushes the change into them.
@@ -287,7 +297,7 @@ local function write(r, v)
 end
 
 local function change(r, d, big)
-	if not (r and r.f) then return end
+	if not (r and r.f) or r.f.type == "action" then return end
 	local v = r.get()
 	if r.f.type == "boolean" then return write(r, v ~= true) end
 	if r.f.choices then return write(r, (v - 1 + d) % #r.f.choices + 1) end
@@ -512,12 +522,21 @@ end
 
 -- Settings, kept as lines of "name=value".
 
+-- Updates, as in SHODAN Stat Editor: ask or install by themselves, from tested releases or every commit.
+local UPDATES = { { "ask", "Ask" }, { "auto", "Automatic" } }
+local CHANNELS = { { "releases", "Releases" }, { "commits", "Every commit" } }
+local function check_updates()
+	local u = fgw.update
+	if u then pcall(u.check, VERSION, CHANNELS[S.cfg.channel][1], UPDATES[S.cfg.updates][1]) end
+end
+
 local function save_settings()
 	local hide = {}
 	for name in pairs(S.cfg.hidden) do hide[#hide + 1] = name end
 	table.sort(hide)
 	fgw.storage.set("settings", table.concat({ "changes=" .. (S.cfg.changes and 1 or 0), "bg=" .. S.cfg.bg,
-		"hints=" .. (S.cfg.hints and 1 or 0), "hide=" .. table.concat(hide, ",") }, "\n"))
+		"hints=" .. (S.cfg.hints and 1 or 0), "updates=" .. UPDATES[S.cfg.updates][1], "channel=" .. CHANNELS[S.cfg.channel][1],
+		"hide=" .. table.concat(hide, ",") }, "\n"))
 end
 
 local function load_settings()
@@ -527,6 +546,8 @@ local function load_settings()
 		if k == "changes" then S.cfg.changes = v ~= "0"
 		elseif k == "hints" then S.cfg.hints = v ~= "0"
 		elseif k == "bg" then S.cfg.bg = BACKGROUNDS[tonumber(v)] and tonumber(v) or DEFAULTS.bg
+		elseif k == "updates" then S.cfg.updates = v == "auto" and 2 or 1
+		elseif k == "channel" then S.cfg.channel = v == "commits" and 2 or 1
 		elseif k == "hide" then for name in string.gmatch(v, "[^,]+") do S.cfg.hidden[name] = true end end
 	end
 end
@@ -535,7 +556,8 @@ end
 local function shown_tab(from, d)
 	for k = 0, #TABS - 1 do
 		local i = (from - 1 + (d == 0 and k or d * (k + 1))) % #TABS + 1
-		if not S.cfg.hidden[TABS[i][1]] then return i end
+		-- Presets isn't a tab on the bar: it has its own button by Settings.
+		if i ~= PRESETS_TAB and not S.cfg.hidden[TABS[i][1]] then return i end
 	end
 	return 1
 end
@@ -579,6 +601,20 @@ local function settings_rows()
 			function() return S.cfg.bg end, function(v) S.cfg.bg = v end, DEFAULTS.bg),
 		setting("Key hints", "The line of keys at the bottom of the window.", { type = "boolean" },
 			function() return S.cfg.hints end, function(v) S.cfg.hints = v end, DEFAULTS.hints),
+		{ header = "Updates" },
+		setting("Updates", "Ask: an Update button shows at the top when there's a new version. Automatic: it downloads by itself. Either way it goes in when you close the game.",
+			{ type = "choice", choices = { "Ask", "Automatic" }, buttons = true }, function() return S.cfg.updates end,
+			function(v)
+				S.cfg.updates = v
+				if fgw.update then pcall(fgw.update.set_mode, UPDATES[v][1]) end
+			end, DEFAULTS.updates),
+		setting("Update channel", "Releases: tested versions only. Every commit: every change as soon as it's pushed, before testing, so it may break.",
+			{ type = "choice", choices = { "Releases", "Every commit" }, buttons = true }, function() return S.cfg.channel end,
+			function(v)
+				if v == S.cfg.channel then return end
+				S.cfg.channel = v
+				check_updates()
+			end, DEFAULTS.channel),
 		{ header = "Tabs" },
 	}
 	for i, tab in ipairs(TABS) do
@@ -594,6 +630,26 @@ local function settings_rows()
 				S.cfg.hidden[name] = (not on) or nil
 			end, true) end
 	end
+	-- About, as SSEO's Settings has it: version, author, links.
+	local function about(label, note, help, buttons)
+		out[#out + 1] = { label = label, note = note, help = help, f = { type = "action", label = label }, buttons = buttons,
+			get = function() end, changed = function() return false end, reset = function() end, setting = true }
+	end
+	local function copy(s)
+		if pcall(global("InputManager").set_clipboard_text, global("InputManager"), s) then toast("Copied") end
+	end
+	local function open(s)
+		if not (fgw.open and fgw.open(s)) then toast("Couldn't open it") end
+	end
+	out[#out + 1] = { header = "About" }
+	about("SHODAN HD1 Editor " .. VERSION, "Made by SHODAN", "Thanks for using it.", {})
+	about("GitHub", (GITHUB:gsub("^https://", "")), "Updates, the source, and where to report a problem.",
+		{ { "Open", function() open(GITHUB) end }, { "Copy", function() copy(GITHUB) end } })
+	local folder = fgw.folder and (fgw.folder:gsub("\\$", ""))
+	if folder then
+		about("Editor folder", folder, "Your kept changes, presets, settings and the log.",
+			{ { "Open", function() open(folder) end }, { "Copy", function() copy(folder) end } })
+	end
 	return out
 end
 
@@ -604,7 +660,7 @@ local function show_presets(n)
 end
 
 local function toggle_settings()
-	if S.settings then return load_tab(shown_tab(S.tab, 0)) end
+	if S.settings then return load_tab(S.tab == PRESETS_TAB and PRESETS_TAB or shown_tab(S.tab, 0)) end
 	S.settings, S.typing, S.confirm = true, nil, nil
 	S.pick = { kind = "settings", name = "Settings (version " .. VERSION .. ")" }
 	S.rows = settings_rows()
@@ -751,9 +807,10 @@ local function shift()
 	return false
 end
 
-local function begin_typing(mode, r)
+-- blank: a new preset's name box starts empty (left empty, it keeps "Preset n").
+local function begin_typing(mode, r, blank)
 	if not global("GuiItems") then return end
-	local start = mode == "search" and S.search or mode == "name" and r.name or ""
+	local start = blank and "" or mode == "search" and S.search or mode == "name" and r.name or ""
 	S.typing = { mode = mode, row = r, text = start, state = {} }
 end
 
@@ -779,7 +836,7 @@ local function read_typing()
 	t.text = text or ""
 	if t.mode == "number" then
 		t.text = (string.gsub(t.text, "[^%d%.%-]", ""))
-		if type(t.state.marker) == "number" and t.state.marker > #t.text then t.state.marker = #t.text end
+		if type(t.state.marker) == "number" and t.state.marker > #t.text + 1 then t.state.marker = #t.text + 1 end  -- #text + 1: after the last letter
 	elseif t.mode == "search" and t.text ~= before then
 		S.search = t.text
 		filter()
@@ -805,7 +862,7 @@ local function keys(dt)
 	if key("pgup", dt) then step_item(-1) end
 	if key("pgdn", dt) then step_item(1) end
 	if key("del", dt) then reset(r) end
-	if key("enter", dt) and r and r.f and r.f.type ~= "boolean" and not r.f.choices then begin_typing("number", r) end
+	if key("enter", dt) and r and r.f and r.f.type ~= "boolean" and r.f.type ~= "action" and not r.f.choices then begin_typing("number", r) end
 	if key("tab", dt) then load_tab(shown_tab(S.tab, shift() and -1 or 1)) end
 end
 
@@ -883,6 +940,15 @@ local function width(s, size, font)
 	return w or 0
 end
 
+-- What's being typed, with the line under the letter the arrow keys are on (after the last one at the end).
+local function typed(x, cy, size, align)
+	local t = S.typing.text
+	local m = type(S.typing.state.marker) == "number" and S.typing.state.marker or #t + 1
+	local left = align == "right" and x - width(t .. "_", size) or x
+	text(t, left, cy, size, WHITE)
+	text("_", left + width(string.sub(t, 1, m - 1), size), cy, size, WHITE)
+end
+
 -- Words into lines no wider than maxw.
 local function wrap(s, size, maxw)
 	local lines, line = {}, ""
@@ -946,7 +1012,7 @@ local function draw_list(x, y, w, h)
 			local n = full_new()
 			if n then
 				show_presets(n)
-				begin_typing("name", S.pick)
+				begin_typing("name", S.pick, true)
 			end
 		end)
 		return
@@ -956,8 +1022,11 @@ local function draw_list(x, y, w, h)
 	local sy, typing = y + h - 26, S.typing and S.typing.mode == "search"
 	rect(x, sy, w - 36, 26, typing and SUNK or S.hover == "search" and HOT or BOX)
 	outline(x, sy, w - 36, 26, (typing or S.hover == "search") and GOLD or LINE)
-	local s = typing and (S.typing.text .. "_") or (S.search ~= "" and S.search or "Search " .. string.lower(TABS[S.tab][1]))
-	text(s, x + 8, sy + 13, 14, (typing or S.search ~= "") and WHITE or DIM)
+	if typing then
+		typed(x + 8, sy + 13, 14)
+	else
+		text(S.search ~= "" and S.search or "Search " .. string.lower(TABS[S.tab][1]), x + 8, sy + 13, 14, S.search ~= "" and WHITE or DIM)
+	end
 	hit("search", x, sy, w - 36, 26, function() begin_typing("search") end)
 	button("unsearch", "X", x + w - 30, sy, 30, 26, function()
 		S.search = ""
@@ -971,7 +1040,7 @@ local function draw_preset(item, x, y, w)
 	if typing then
 		rect(x - 4, y - 4, 420, 28, SUNK)
 		outline(x - 4, y - 4, 420, 28, GOLD)
-		text(S.typing.text .. "_", x + 4, y + 10, 18, WHITE)
+		typed(x + 4, y + 10, 18)
 		text("Enter keeps the name, Esc goes back", x + 428, y + 10, 13, MUTED)
 	else
 		text(item.name, x, y + 10, 20, S.hover == "rename" and WHITE or GOLD, nil, "ui_heading")
@@ -1069,15 +1138,17 @@ local function draw_rows(x, y, w, h)
 			local v, changed = r.get(), r.changed()
 			clip(x, ry, vx - x - 90, ROW_H, function() text(r.label, x + 6, ry + ROW_H / 2, 15, WHITE) end)
 			local typing = S.typing and S.typing.row == r
-			if typing then
+			if r.f.type == "action" then
+				text(r.note, vx, ry + ROW_H / 2, 15, MUTED, "right")
+			elseif typing then
 				rect(vx - 80, ry + 1, 84, ROW_H - 3, SUNK)
 				outline(vx - 80, ry + 1, 84, ROW_H - 3, GOLD)
-				text(S.typing.text .. "_", vx, ry + ROW_H / 2, 15, WHITE, "right")
+				typed(vx, ry + ROW_H / 2, 15, "right")
 			else
 				local shown = v
 				if r.f.type == "boolean" then shown = v == true end
 				if r.f.choices then shown = r.f.choices[v] end
-				text(show(shown), vx, ry + ROW_H / 2, 15, changed and GOLD or WHITE, "right")
+				if not r.f.buttons then text(show(shown), vx, ry + ROW_H / 2, 15, changed and GOLD or WHITE, "right") end
 				if r.f.type ~= "boolean" and not r.f.choices then
 					hit("value" .. i, vx - 80, ry, 84, ROW_H - 1, function()
 						S.row = i
@@ -1086,8 +1157,23 @@ local function draw_rows(x, y, w, h)
 				end
 			end
 			local by, bh = ry + 1, ROW_H - 3
-			if r.f.type == "boolean" then
+			if r.f.type == "action" then
+				for k, b in ipairs(r.buttons) do
+					button("a" .. i .. "_" .. k, b[1], bx + (k - 1) * 76, by, 72, bh, function()
+						S.row = i
+						b[2]()
+					end)
+				end
+			elseif r.f.type == "boolean" then
 				button("t" .. i, v == true and "Turn off" or "Turn on", bx, by, 122, bh, function() change(r, 1) end)
+			elseif r.f.buttons then
+				-- One button per choice, the chosen one lit.
+				for k, name in ipairs(r.f.choices) do
+					button("t" .. i .. "_" .. k, name, bx + 122 - (#r.f.choices - k + 1) * 126 + 4, by, 122, bh, function()
+						S.row = i
+						r.set(k)
+					end, v == k)
+				end
 			elseif r.f.choices then
 				button("t" .. i, "Next", bx, by, 122, bh, function() change(r, 1) end)
 			else
@@ -1096,7 +1182,7 @@ local function draw_rows(x, y, w, h)
 				button("p" .. i, "+", bx + 64, by, 28, bh, function() change(r, 1) end)
 				button("pp" .. i, "++", bx + 96, by, 28, bh, function() change(r, 1, true) end)
 			end
-			button("r" .. i, "R", bx + 128, by, 22, bh, function() reset(r) end, false, changed and GOLD or DIM)
+			if r.f.type ~= "action" then button("r" .. i, "R", bx + 128, by, 22, bh, function() reset(r) end, false, changed and GOLD or DIM) end
 		end
 	end
 	scrollbar(x + w - 5, top, n * ROW_H, S.row_top, n, #S.rows)
@@ -1121,6 +1207,12 @@ local function draw_footer(x, y)
 	end
 	local right = x + WW - PAD
 	button("settings", "Settings", right - 90, fy, 90, 22, toggle_settings, S.settings)
+	local on_presets = S.tab == PRESETS_TAB and not S.settings
+	button("presets", "Presets", right - 184, fy, 90, 22, function()
+		if on_presets then return load_tab(shown_tab(S.back or 1, 0)) end
+		if S.tab ~= PRESETS_TAB then S.back = S.tab end
+		load_tab(PRESETS_TAB)
+	end, on_presets)
 	-- Resets ask first: the button says "Sure?" and a second click does it.
 	local function sure(kind, label, bx, bw, fn)
 		local asking = S.confirm and S.confirm.kind == kind
@@ -1131,10 +1223,10 @@ local function draw_footer(x, y)
 		end, false, asking and GOLD or nil)
 	end
 	if S.settings then
-		sure("resetall", "Reset all", right - 184, 90, reset_all)
-		sure("resetitem", "Reset settings", right - 302, 114, reset_item)
+		sure("resetall", "Reset all", right - 278, 90, reset_all)
+		sure("resetitem", "Reset settings", right - 396, 114, reset_item)
 	else
-		sure("resetitem", "Reset item", right - 208, 114, reset_item)
+		sure("resetitem", "Reset item", right - 302, 114, reset_item)
 	end
 	local r = S.rows[S.row]
 	for i, line in ipairs(wrap(r and r.help or "", 14, WW - PAD * 2 - 180)) do
@@ -1154,15 +1246,22 @@ end
 local function draw()
 	rect(WX, WY, WW, WH, { BG[1], BG[2], BG[3], BACKGROUNDS[S.cfg.bg][2] }, 820)
 	outline(WX, WY, WW, WH, GOLD)
-	text("SHODAN FGW EDITOR", WX + PAD, WY + 18, 20, GOLD, nil, "ui_heading")
+	text("SHODAN HD1 EDITOR", WX + PAD, WY + 18, 20, GOLD, nil, "ui_heading")
 	local slot = storage.get("preset")
 	local loaded = slot and full_name(storage.get(full_key(slot)))
 	local pw = width(loaded or "none", 14)
 	text(loaded or "none", WX + WW - PAD, WY + 18, 14, loaded and GOLD or MUTED, "right")
 	text("Preset: ", WX + WW - PAD - pw, WY + 18, 14, MUTED, "right")
+	local offer = fgw.update and fgw.update.offer()
+	if offer then
+		local ow = width(offer, 14) + 20
+		local ox = WX + WW - PAD - pw - width("Preset: ", 14) - ow - 16
+		local can = fgw.update.state == "available"
+		button("update", offer, ox, WY + 7, ow, 22, function() if can then fgw.update.install() end end, can, can and WHITE or MUTED)
+	end
 	local tx, ty = WX + PAD, WY + 36
 	for i, tab in ipairs(TABS) do
-		if not S.cfg.hidden[tab[1]] then
+		if i ~= PRESETS_TAB and not S.cfg.hidden[tab[1]] then
 			local w = width(tab[1], 14) + 12
 			if tx + w > WX + WW - PAD then tx, ty = WX + PAD, ty + 26 end
 			button("tab" .. i, tab[1], tx, ty, w, 22, function() load_tab(i) end, i == S.tab and not S.settings)
@@ -1216,6 +1315,7 @@ local function frame()
 end
 
 load_settings()
+check_updates()
 fgw.ui.frame(1280, 720)
 kit = fgw.ui.canvas("stat_editor", { over_fades = true })
 

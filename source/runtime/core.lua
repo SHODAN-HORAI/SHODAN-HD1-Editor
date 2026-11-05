@@ -1,4 +1,4 @@
--- SHODAN FGW Editor's runtime: starts the editor inside the game and gives it what it needs, as the
+-- SHODAN HD1 Editor's runtime: starts the editor inside the game and gives it what it needs, as the
 -- table `fgw` the editor and the API files (api/lib/, MIT, see api/LICENSE) call.
 -- The engine calls the global `update` every frame; the boot script defines it after this file runs, so
 -- the frame driver goes in from a wrapped `require`, as do hooks on classes that load later.
@@ -9,10 +9,10 @@ local function pack(...) return { n = select("#", ...), ... } end
 
 local M = { frame_fns = {}, hooks = {}, binds = {}, toasts = {}, modules = {}, started = false }
 local ID = "shodan.fgw"
-local FOLDER = nil   -- %LOCALAPPDATA%\SHODAN\FGWEditor\, made by the installer
+local FOLDER = nil   -- %LOCALAPPDATA%\SHODAN\SHD1Editor\, made by the installer
 do
 	local ok, base = pcall(function() return os.getenv("LOCALAPPDATA") end)
-	if ok and type(base) == "string" then FOLDER = base .. "\\SHODAN\\FGWEditor\\" end
+	if ok and type(base) == "string" then FOLDER = base .. "\\SHODAN\\SHD1Editor\\" end
 end
 
 -- Log: one file per launch, kept short.
@@ -187,10 +187,23 @@ local function draw_toasts(dt)
 	end
 end
 
+local update = nil
+
 -- The frame driver.
 local function frame(dt)
 	pending_hooks()
 	poll_binds()
+	if update then
+		pcall(update.tick, dt)
+		if update.done and toast_kit:ready() then
+			toast("SHODAN HD1 Editor updated to " .. update.done)
+			update.done = nil
+		end
+		if update.failed and toast_kit:ready() then
+			toast("HD1 Editor " .. update.failed .. " couldn't go in by itself: run Install.bat in " .. FOLDER .. "update\\SHODAN HD1 Editor")
+			update.failed = nil
+		end
+	end
 	for i = #M.frame_fns, 1, -1 do
 		local f = M.frame_fns[i]
 		local ok, done = pcall(f)
@@ -285,11 +298,15 @@ G.fgw = {
 function M.start()
 	if M.started then return end
 	M.started = true
-	log("SHODAN FGW Editor starting")
+	log("SHODAN HD1 Editor starting")
 	kit = require("fgw/kit")
 	kit.setup(log)
 	toast_kit = kit.canvas("toasts", { over_fades = true })
 	require("fgw/block").setup(hook, log)
+	update = require("fgw/update")
+	update.setup(FOLDER, log, toast)
+	G.fgw.update = update
+	G.fgw.open, G.fgw.folder = update.open, FOLDER
 	wrap_require()
 	drive()
 	local ok, err = pcall(require, "fgw/editor")

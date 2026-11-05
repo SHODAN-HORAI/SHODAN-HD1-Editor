@@ -1,4 +1,4 @@
-# SHODAN FGW Editor installer. installer.ps1 install|remove
+# SHODAN HD1 Editor installer. installer.ps1 install|remove
 # Puts the editor's patch file in the game's contents folder. A patch file there that isn't ours (another
 # mod's) is backed up first and everything in it goes into ours, its boot chunk run after ours, so that
 # mod keeps working beside the editor.
@@ -12,8 +12,11 @@ $BootName = [Convert]::ToUInt64("35546153a5bb59d2", 16)  # foundation/lua/build_
 $ChainName = [Convert]::ToUInt64("0776dd65fac5026d", 16) # fgw/chain: the other mod's boot chunk
 $Lua = [Convert]::ToUInt64("a14e8dfa2cd117e2", 16)
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Folder = Join-Path $env:LOCALAPPDATA "SHODAN\FGWEditor"
+$Folder = Join-Path $env:LOCALAPPDATA "SHODAN\SHD1Editor"
 $Backup = Join-Path $Folder "backup\$Name"
+# The folder of the editor's old name (FGW Editor), with its edits, presets and backup.
+$OldFolder = Join-Path $env:LOCALAPPDATA "SHODAN\FGWEditor"
+if ((Test-Path $OldFolder) -and -not (Test-Path $Folder)) { Move-Item $OldFolder $Folder }
 
 function Find-Game {
 	$libs = @()
@@ -150,7 +153,14 @@ function Install($contents) {
 		Write-Host "Kept the other mod's patch file inside ours ($kept files), so it keeps working."
 	}
 	[IO.File]::WriteAllBytes($target, $mine)
-	Write-Host "SHODAN FGW Editor is installed. Start HELLDIVERS and press F7."
+	# Where the game is, for the editor's own updater, and which development build this is (none for a release).
+	New-Item -ItemType Directory -Force (Join-Path $Folder "update") | Out-Null
+	$commit = Join-Path $Folder "update\commit.txt"
+	if (Test-Path (Join-Path $Here "commit.txt")) { Copy-Item (Join-Path $Here "commit.txt") $commit -Force }
+	elseif (Test-Path $commit) { Remove-Item $commit -Force }
+	[IO.File]::WriteAllText((Join-Path $Folder "game.txt"), $contents)
+	if (Test-Path (Join-Path $Folder "updater.ps1")) { Remove-Item (Join-Path $Folder "updater.ps1") -Force }
+	Write-Host "SHODAN HD1 Editor is installed. Start HELLDIVERS and press F7."
 }
 
 function Remove($contents) {
@@ -158,7 +168,7 @@ function Remove($contents) {
 	if ((Test-Path $target) -and -not (Is-Ours $target)) {
 		# Another mod manager wrote its own since: that one stays, and the old backup is out of date.
 		if (Test-Path $Backup) { Remove-Item $Backup -Force }
-		Write-Host "SHODAN FGW Editor wasn't installed (another mod's patch file is there). Nothing changed."
+		Write-Host "SHODAN HD1 Editor wasn't installed (another mod's patch file is there). Nothing changed."
 		return
 	}
 	if (Test-Path $target) { Remove-Item $target -Force }
@@ -167,7 +177,7 @@ function Remove($contents) {
 		Remove-Item $Backup -Force
 		Write-Host "Put the other mod's patch file back."
 	}
-	Write-Host "SHODAN FGW Editor is removed. Your saved edits and presets stay in $Folder."
+	Write-Host "SHODAN HD1 Editor is removed. Your saved edits and presets stay in $Folder."
 }
 
 try {
