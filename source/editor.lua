@@ -252,15 +252,47 @@ local function step_of(f, v)
 	return 5
 end
 
+local function owned(item)
+	local ok, map = pcall(api.progress.upgrades)
+	return ok and type(map) == "table" and tonumber(map[item.save]) or 0
+end
+
+-- The upgrades a unit's weapons use now, by index into its upgrade_info: chosen here, else bought.
+local function active_of(item)
+	local _, st = settings_of(item.unit)
+	local info = item.save and st and st.upgrade_info
+	if type(info) ~= "table" then return {} end
+	local mask
+	if info.type == "bitmask" then mask = S.att[item.unit] or owned(item)
+	elseif item.strat then mask = S.att["strat:" .. item.strat] or 2 ^ math.min(owned(item), #info) - 1
+	else mask = 2 ^ math.min(S.att[item.unit] or owned(item), #info) - 1 end
+	local out = {}
+	for i = 1, #info do if math.floor(mask / 2 ^ (i - 1)) % 2 == 1 then out[#out + 1] = { i = i, t = info[i] } end end
+	return out
+end
+
+-- An upgrade replaces a value rather than adding to it, so a row reads and writes the last active
+-- upgrade that sets the field: an edit to the base would do nothing while that upgrade is on.
+local function source_of(ups, path)
+	for n = #ups, 1, -1 do
+		if edits.table_value(ups[n].t, path) ~= nil then return ups[n] end
+	end
+	return nil
+end
+
 local function bind(item, f)
 	local r = { f = f, label = f.label }
 	local opts = { min = f.min, max = f.max, apply = f.apply, target = item.name, new = f.opt }
 	if item.kind == "unit" or item.kind == "hero" then
 		local sp = item.key
-		r.get = function() return edits.value(sp, f.path) end
-		r.changed = function() return (edits.original(sp, f.path)) end
-		r.reset = function() return edits.revert_where(sp, f.path) end
-		r.set = function(v) return edits.set_unit(sp, f.path, v, opts) end
+		local function at()
+			local up = item.unit and source_of(active_of(item), f.path)
+			return up and ("upgrade_info." .. up.i .. "." .. f.path) or f.path
+		end
+		r.get = function() return edits.value(sp, at()) end
+		r.changed = function() return (edits.original(sp, at())) end
+		r.reset = function() return edits.revert_where(sp, at()) end
+		r.set = function(v) return edits.set_unit(sp, at(), v, opts) end
 	elseif item.kind == "proj" then
 		local _, t = settings_of(item.unit)
 		opts.keep = "proj:" .. item.unit
@@ -270,7 +302,13 @@ local function bind(item, f)
 		r.set = function(v) return edits.set_table(item.name, t, f.path, v, opts) end
 	elseif item.kind == "strat" then
 		local s = catalog.stratagem(item.id)
-		r.get = function() return edits.table_value(s, f.path) end
+		-- An edit lands in the stratagem and every upgrade that sets the field; this shows what's in use.
+		r.get = function()
+			local ups, mask = {}, S.att["strat:" .. item.id] or 2 ^ math.min(owned({ save = item.id }), #(s.upgrades or {})) - 1
+			for i, u in ipairs(s.upgrades or {}) do if math.floor(mask / 2 ^ (i - 1)) % 2 == 1 then ups[#ups + 1] = { t = u } end end
+			local up = source_of(ups, f.path)
+			return edits.table_value(up and up.t or s, f.path)
+		end
 		r.changed = function() return edits.table_changed(s, f.path) end
 		r.reset = function() return edits.revert_table(s, f.path) end
 		r.set = function(v) return api.stratagems.edit(item.id, f.path, v) end
@@ -289,6 +327,8 @@ local function bind(item, f)
 	r.step = step_of(f, v)
 	local help = f.meaning and (f.meaning .. ". ") or ""
 	if f.min and f.max and f.type ~= "boolean" then help = help .. string.format("From %g to %g. ", f.min, f.max) end
+	local up = item.kind == "unit" and item.unit and source_of(active_of(item), f.path)
+	if up then help = help .. "Set by " .. upgrade_title(item.upgrades and item.upgrades[up.i] or up.t, up.i) .. ", which is on: this is its value. " end
 	r.help = help .. (APPLIES[f.apply] or "")
 	return r
 end
@@ -296,11 +336,6 @@ end
 -- Attachments. The game builds a settings table for every upgrade value of a weapon at load, and each
 -- weapon finds its own through LuaSettingsManager:get_modified_settings(unit, upgrade_value). The hook
 -- at the end hands it the value chosen here instead, so the save's upgrades stay as they are.
-
-local function owned(item)
-	local ok, map = pcall(api.progress.upgrades)
-	return ok and type(map) == "table" and tonumber(map[item.save]) or 0
-end
 
 local function set_att(path, value, own)
 	if value == own then S.att[path] = nil else S.att[path] = value end
