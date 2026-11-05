@@ -1,7 +1,7 @@
 # SHODAN HD1 Editor installer. installer.ps1 install|remove
-# Puts the editor's patch file in the game's contents folder. A patch file there that isn't ours (another
-# mod's) is backed up first and everything in it goes into ours, its boot chunk run after ours, so that
-# mod keeps working beside the editor.
+# Puts the editor's patch file in the game's contents folder. Patch files there that aren't ours (another
+# mod's, at any patch level) are backed up first and everything in them goes into ours, their boot chunk
+# run after ours, so those mods keep working beside the editor.
 param([string]$Action = "install")
 $ErrorActionPreference = "Stop"
 
@@ -122,15 +122,27 @@ function Is-Ours($path) {
 	return $false
 }
 
+# The game's patch levels for our bundle (patch_0, patch_1, ...) in one folder, lowest first. The game
+# loads them in that order, so a later level wins (Obsidian writes patch_1 when patch_0 isn't its own).
+function Levels($dir) {
+	return @(Get-ChildItem $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^$Base\.patch_(\d+)$" } |
+		Sort-Object { [int]($_.Name -replace '^.*_', '') })
+}
+
 function Install($contents) {
-	New-Item -ItemType Directory -Force (Split-Path $Backup) | Out-Null
+	$dir = Split-Path $Backup
+	New-Item -ItemType Directory -Force $dir | Out-Null
 	$target = Join-Path $contents $Name
-	if ((Test-Path $target) -and -not (Is-Ours $target)) {
-		Copy-Item $target $Backup -Force
-		Write-Host "Backed up the patch file that was there (another mod's)."
+	foreach ($f in (Levels $contents)) {
+		if (Is-Ours $f.FullName) { continue }
+		Copy-Item $f.FullName (Join-Path $dir $f.Name) -Force
+		# Higher levels would load over ours and hide the editor: they go inside ours instead.
+		if ($f.Name -ne $Name) { Remove-Item $f.FullName -Force }
+		Write-Host "Backed up $($f.Name) (another mod's)."
 	}
 	$mine = [IO.File]::ReadAllBytes((Join-Path $Here $Name))
-	if (Test-Path $Backup) {
+	$others = Levels $dir
+	if ($others.Count) {
 		$ours = Parse (Unpack $mine)
 		$names = @{}
 		foreach ($r in $ours.res) { $names[$r.name] = $true }
@@ -139,16 +151,20 @@ function Install($contents) {
 			if ($r.name -eq $BootName) { $r = Lua-Record $BootName ([IO.File]::ReadAllBytes((Join-Path $Here "boot_chain.bin"))) }
 			$all += , $r
 		}
-		$kept = 0
-		foreach ($r in (Read-Bundle $Backup).res) {
-			if ($r.name -eq $BootName) {
-				# Its boot chunk, under our name for it.
-				[Array]::Copy([BitConverter]::GetBytes([UInt64]$ChainName), 0, $r.bytes, 8, 8)
-				$r.name = $ChainName
-			} elseif ($names[$r.name]) { continue }
-			$all += , $r
-			$kept++
+		# Every level's files, a higher level's copy replacing a lower one's, as the game would load them.
+		$foreign = [ordered]@{}
+		foreach ($f in $others) {
+			foreach ($r in (Read-Bundle $f.FullName).res) {
+				if ($r.name -eq $BootName) {
+					# Its boot chunk, under our name for it.
+					[Array]::Copy([BitConverter]::GetBytes([UInt64]$ChainName), 0, $r.bytes, 8, 8)
+					$r.name = $ChainName
+				} elseif ($names[$r.name]) { continue }
+				$foreign["$($r.type)-$($r.name)"] = $r
+			}
 		}
+		$all += @($foreign.Values)
+		$kept = $foreign.Count
 		$mine = Pack $ours.block @($all | Sort-Object { $_.name })
 		Write-Host "Kept the other mod's patch file inside ours ($kept files), so it keeps working."
 	}
@@ -165,17 +181,19 @@ function Install($contents) {
 
 function Remove($contents) {
 	$target = Join-Path $contents $Name
+	$dir = Split-Path $Backup
 	if ((Test-Path $target) -and -not (Is-Ours $target)) {
-		# Another mod manager wrote its own since: that one stays, and the old backup is out of date.
-		if (Test-Path $Backup) { Remove-Item $Backup -Force }
+		# Another mod manager wrote its own since: that one stays, and the old backups are out of date.
+		foreach ($f in (Levels $dir)) { Remove-Item $f.FullName -Force }
 		Write-Host "SHODAN HD1 Editor wasn't installed (another mod's patch file is there). Nothing changed."
 		return
 	}
 	if (Test-Path $target) { Remove-Item $target -Force }
-	if (Test-Path $Backup) {
-		Copy-Item $Backup $target -Force
-		Remove-Item $Backup -Force
-		Write-Host "Put the other mod's patch file back."
+	foreach ($f in (Levels $dir)) {
+		$to = Join-Path $contents $f.Name
+		# A level another mod wrote since is newer than our backup of it: that one stays.
+		if (-not (Test-Path $to)) { Copy-Item $f.FullName $to -Force; Write-Host "Put $($f.Name) back (another mod's)." }
+		Remove-Item $f.FullName -Force
 	}
 	Write-Host "SHODAN HD1 Editor is removed. Your saved edits and presets stay in $Folder."
 }
