@@ -380,13 +380,56 @@ local function status_ids(st, projs)
 	return out
 end
 
+-- The key a section's values are kept under, the same for every item that reaches them.
+local function key_of(owner)
+	if owner.kind == "unit" then return owner.key end
+	if owner.kind == "proj" then return "proj:" .. owner.unit end
+	if owner.kind == "status" then return "status:" .. owner.id end
+	return nil
+end
+
+-- Which items reach each key (their own settings, their shots, their effects), over every tab of
+-- units. Built once the game has loaded them, like SSEO's 'shared with' notes.
+local share
+local function share_names(key, own)
+	if not key then return nil end
+	if not share then
+		local index, any = {}, false
+		local function add(k, name)
+			index[k] = index[k] or {}
+			for _, n in ipairs(index[k]) do if n == name then return end end
+			index[k][#index[k] + 1] = name
+		end
+		for i, tab in ipairs(TABS) do
+			local ok, list = pcall(tab[2])
+			for _, it in ipairs(ok and type(list) == "table" and list or {}) do
+				if it.kind == "unit" then
+					local sp, st = settings_of(it.unit)
+					if sp and st then
+						any = true
+						add(sp, it.name)
+						local projs = projectiles_of(st, it.name, it.upgrades)
+						for _, p in ipairs(projs) do add(p.key, it.name) end
+						for _, id in ipairs(status_ids(st, projs)) do add("status:" .. id, it.name) end
+					end
+				end
+			end
+		end
+		if not any then return nil end
+		share = index
+	end
+	local out = {}
+	for _, n in ipairs(share[key] or {}) do if n ~= own then out[#out + 1] = n end end
+	return #out > 0 and out or nil
+end
+
 -- Every row of an item: family headers, then its fields. nil when the game hasn't loaded its data here.
 local function rows_of(item)
 	if item.kind == "preset" then return {} end
 	local out = {}
 	local function family(name, fields, owner)
 		local start = #out
-		out[#out + 1] = { header = FAMILY[name] or name }
+		out[#out + 1] = { header = FAMILY[name] or name, share = share_names(key_of(owner or item), item.name) }
 		for _, f in ipairs(fields) do out[#out + 1] = bind(owner or item, f) end
 		if #out == start + 1 then out[#out] = nil end
 	end
@@ -1148,8 +1191,8 @@ local function outline(x, y, w, h, c, z)
 end
 
 -- cy: the line's middle.
-local function text(s, x, cy, size, c, align, font)
-	kit:layer(824)
+local function text(s, x, cy, size, c, align, font, z)
+	kit:layer(z or 824)
 	kit:text(s, x, H - (cy + size * 0.33), { font = font or "ui", size = size, color = c, align = align })
 end
 
@@ -1348,7 +1391,22 @@ local function draw_rows(x, y, w, h)
 		local ry = top + (i - S.row_top) * ROW_H
 		if r.header then
 			rect(x, ry, w - 8, ROW_H - 2, BAND)
-			text(string.upper(r.header), x + 6, ry + ROW_H / 2 - 1, 13, MUTED)
+			local head = string.upper(r.header)
+			text(head, x + 6, ry + ROW_H / 2 - 1, 13, MUTED)
+			if r.share then
+				-- As in SSEO: the other items this section's values also change, as many as fit, then +N.
+				local nx = x + 6 + width(head, 13) + 14
+				local room, note, shown = x + w - 16 - nx, nil, 0
+				for k = math.min(3, #r.share), 1, -1 do
+					shown = k
+					note = "shared with " .. table.concat(r.share, ", ", 1, k) .. (#r.share > k and (" +" .. (#r.share - k)) or "")
+					if k == 1 or width(note, 13) <= room then break end
+				end
+				clip(nx, ry, room, ROW_H, function() text(note, nx, ry + ROW_H / 2 - 1, 13, GOLD) end)
+				local id = "share" .. i
+				hit(id, nx, ry, room, ROW_H - 2, function() end)
+				if S.hover == id and #r.share > shown then S.share_tip = { names = r.share, x = nx, y = ry + ROW_H } end
+			end
 		else
 			local id = "row" .. i
 			if i == S.row then rect(x, ry, w - 8, ROW_H - 1, FOCUS)
@@ -1496,6 +1554,31 @@ local function draw()
 		draw_rows(WX + PAD + LIST_W + 24, top, WW - LIST_W - PAD * 2 - 24, bottom - top)
 	end
 	draw_footer(WX, bottom + 6)
+	local tip = S.share_tip
+	S.share_tip = nil
+	if tip then
+		-- Every name a cut-short 'shared with' names, in columns, over the rows below it.
+		local names = {}
+		for k, n in ipairs(tip.names) do names[k] = n end
+		table.sort(names, function(a, b) return string.lower(a) < string.lower(b) end)
+		local col_w, pitch = 210, 18
+		local cols = math.min(4, math.max(1, math.ceil(#names / 12)))
+		local rows = math.min(math.ceil(#names / cols), math.floor((H - 160) / pitch))
+		local shown = math.min(#names, cols * rows)
+		if shown < #names then shown = shown - 1 end
+		local w, h = cols * col_w + 24, rows * pitch + 40
+		local x = math.max(16, math.min(tip.x, 1280 - 16 - w))
+		local y = tip.y
+		if y + h > H - 40 then y = math.max(16, tip.y - ROW_H - h) end
+		rect(x, y, w, h, { 8, 11, 15 }, 830)
+		outline(x, y, w, h, GOLD, 831)
+		text("Also changes (" .. #names .. "):", x + 12, y + 16, 13, MUTED, nil, nil, 832)
+		for k = 1, shown do
+			local c, r = math.floor((k - 1) / rows), (k - 1) % rows
+			text(names[k], x + 12 + c * col_w, y + 36 + r * pitch, 13, WHITE, nil, nil, 832)
+		end
+		if shown < #names then text("+" .. (#names - shown) .. " more", x + 12 + (cols - 1) * col_w, y + 36 + (rows - 1) * pitch, 13, DIM, nil, nil, 832) end
+	end
 end
 
 local function frame()
