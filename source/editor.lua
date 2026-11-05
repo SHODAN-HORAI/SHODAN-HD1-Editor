@@ -112,8 +112,8 @@ local function units(list, extra)
 	local out = {}
 	-- save: the name the save keeps the item's upgrades under. A pack's are its stratagem's.
 	for _, it in ipairs(list) do
-		local strat = not it.upgrades and catalog.stratagem(it.name)
-		out[#out + 1] = { kind = "unit", name = catalog.text(it.name), unit = it.unit_path, save = it.stratagem or it.name, upgrades = it.upgrades or strat and strat.upgrades, strat = strat and it.name }
+		local strat = not it.upgrades and catalog.stratagem(it.stratagem or it.name)
+		out[#out + 1] = { kind = "unit", name = catalog.text(it.name), unit = it.unit_path, save = it.stratagem or it.name, upgrades = it.upgrades or strat and strat.upgrades, strat = strat and strat.name }
 	end
 	for _, e in ipairs(extra or {}) do out[#out + 1] = { kind = "unit", name = e[1], unit = e[2] } end
 	return out
@@ -195,6 +195,23 @@ local function settings_of(unit)
 	return nil
 end
 
+-- An upgrade's name. Weapon attachments have their own (Penetrator rounds); the game calls a stratagem's
+-- only "<stratagem> Mk2", so those are named by what the armory lists them adding: "Mk2: Magazine".
+local function upgrade_title(up, i)
+	local name = up and up.upgrade_name and catalog.text(up.upgrade_name) or ("Upgrade " .. i)
+	local mk = string.match(name, "[Mm][Kk]%s*(%d+)%s*$")
+	local attrs = up and type(up.upgrade_attributes) == "table" and up.upgrade_attributes
+	if not (mk and attrs) then return name end
+	local keys = {}
+	for k, v in pairs(attrs) do keys[#keys + 1] = type(k) == "string" and k or tostring(v) end
+	table.sort(keys)
+	for n, k in ipairs(keys) do
+		local t = string.lower(catalog.text(k))
+		keys[n] = string.upper(string.sub(t, 1, 1)) .. string.sub(t, 2)
+	end
+	return #keys > 0 and ("Mk" .. mk .. ": " .. table.concat(keys, ", ")) or name
+end
+
 -- A launcher's damage is in the explosion of the projectile it fires, which has its own settings path.
 -- Missiles (gameobjects/...) have no settings path, only a table found by unit path, so they're edited
 -- as a table kept under "proj:<unit path>". A gun's shot is in weapon_info, an exosuit's missiles in
@@ -218,7 +235,7 @@ local function projectiles_of(st, name, upgrades)
 	local info = st and st.upgrade_info
 	for i, u in ipairs(type(info) == "table" and info or {}) do
 		local up = upgrades and upgrades[i]
-		local title = up and up.upgrade_name and catalog.text(up.upgrade_name) or ("Upgrade " .. i)
+		local title = upgrade_title(up, i)
 		add(u, " (" .. title .. ")")
 	end
 	return out
@@ -302,7 +319,7 @@ local function upgrade_rows(name, names)
 		local bit = 2 ^ (i - 1)
 		local function has(m) return math.floor(m / bit) % 2 == 1 end
 		local up = names[i] or {}
-		local title = up.upgrade_name and catalog.text(up.upgrade_name) or ("Upgrade " .. i)
+		local title = upgrade_title(up, i)
 		local r = { label = title, f = { type = "boolean", apply = "reload", label = title }, step = 1 }
 		r.get = function() return has(value()) end
 		r.changed = function() return has(value()) ~= has(own()) end
@@ -329,7 +346,7 @@ local function attachment_rows(item, info)
 			local bit = 2 ^ (i - 1)
 			local function has(m) return math.floor(m / bit) % 2 == 1 end
 			local up = names[i] or {}
-			local title = up.upgrade_name and catalog.text(up.upgrade_name) or ("Upgrade " .. i)
+			local title = upgrade_title(up, i)
 			local r = { label = title, f = { type = "boolean", apply = "reload", label = title }, step = 1 }
 			r.get = function() return has(value()) end
 			r.changed = function() return has(value()) ~= has(owned(item)) end
