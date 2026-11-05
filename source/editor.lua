@@ -47,6 +47,14 @@ for _, f in ipairs(CHARACTER) do f.family, f.type = "character", "number" end
 
 -- Fields the game has that the API doesn't list, by family. A row shows only where the item has the
 -- value (opt ones everywhere), and a path the API already lists is skipped.
+local MOVE = {
+	{ path = "weapon_info.move_speed_aim", label = "Move speed aiming", min = 0, max = 3, apply = "reload", meaning = "Multiplier" },
+	{ path = "weapon_info.move_speed_fire", label = "Move speed firing", min = 0, max = 3, apply = "reload", meaning = "Multiplier" },
+	{ path = "weapon_info.move_speed_reload", label = "Move speed reloading", min = 0, max = 3, apply = "reload", meaning = "Multiplier. 0 stands you still" },
+	{ path = "weapon_info.turn_speed_aim", label = "Turn speed aiming", min = 0, max = 1.5, apply = "reload", meaning = "Multiplier" },
+	{ path = "weapon_info.turn_speed_fire", label = "Turn speed firing", min = 0, max = 1.5, apply = "reload", meaning = "Multiplier" },
+	{ path = "weapon_info.turn_speed_reload", label = "Turn speed reloading", min = 0, max = 1.5, apply = "reload", meaning = "Multiplier" },
+}
 local RELOAD = {
 	{ path = "weapon_info.reload_duration", label = "Reload time (empty)", min = 0.05, max = 30, apply = "live" },
 	{ path = "weapon_info.reload_duration_fast", label = "Reload time (tactical)", min = 0.05, max = 30, apply = "live", meaning = "With rounds left in the magazine" },
@@ -54,9 +62,33 @@ local RELOAD = {
 	{ path = "weapon_info.magazines", label = "Spare magazines", min = 0, max = 255, apply = "spawn", meaning = "Carried at the start, and added by an ammo pickup" },
 }
 local EXTRA = {
+	firearm = {
+		{ path = "weapon_info.heal_per_second", label = "Healing per second", min = 0, max = 5000, apply = "reload" },
+		{ path = "weapon_info.max_num_targets", label = "Heal targets", min = 1, max = 10, apply = "reload", meaning = "People healed at once" },
+	},
 	launcher = {},
+	beam = {},
+	flame = {},
+	arc = {
+		{ path = "weapon_info.max_range_from_owner", label = "Max range", min = 1, max = 100, apply = "reload", meaning = "Meters from you" },
+		{ path = "weapon_info.min_range_from_owner", label = "Min range", min = 0, max = 20, apply = "reload", meaning = "Meters from you" },
+		{ path = "weapon_info.arc_size_min", label = "Cone at no charge", min = 0.05, max = 3.14, apply = "reload", meaning = "In radians" },
+		{ path = "weapon_info.min_number_of_jumps", label = "Min jumps", min = 1, max = 20, apply = "reload" },
+		{ path = "weapon_info.max_jump_distance_inside_arc", label = "Jump range inside the cone", min = 0, max = 50, apply = "live", meaning = "Meters" },
+		{ path = "weapon_info.max_jump_distance_outside_arc", label = "Jump range outside the cone", min = 0, max = 50, apply = "live", meaning = "Meters" },
+		{ path = "weapon_info.round_delay", label = "Shot delay (s)", min = 0, max = 2, apply = "reload" },
+	},
+	explosive = {
+		{ path = "explosive_info.ignore_armor", type = "boolean", opt = true, label = "Ignores armor", apply = "live" },
+		{ path = "explosive_info.ignore_shields", type = "boolean", opt = true, label = "Ignores shields", apply = "live" },
+		{ path = "explosive_info.explode_on_impact", type = "boolean", label = "Explodes on impact", apply = "spawn" },
+		{ path = "explosive_info.arm_time", label = "Arming time (s)", min = 0, max = 30, apply = "spawn" },
+	},
 }
 for _, f in ipairs(RELOAD) do EXTRA.launcher[#EXTRA.launcher + 1] = f end
+for _, list in pairs({ EXTRA.firearm, EXTRA.launcher, EXTRA.beam, EXTRA.flame, EXTRA.arc }) do
+	for _, f in ipairs(MOVE) do list[#list + 1] = f end
+end
 for name, list in pairs(EXTRA) do
 	for _, f in ipairs(list) do f.family, f.type = name, f.type or "number" end
 end
@@ -287,6 +319,23 @@ local function attachment_rows(item, info)
 	return out
 end
 
+-- The status effects a settings table and its projectiles apply, by template name.
+local function status_ids(st, projs)
+	local out, seen = {}, {}
+	local t = global("StatusTemplateSettings")
+	local sources = { st }
+	for _, p in ipairs(projs or {}) do sources[#sources + 1] = p.st end
+	for _, src in ipairs(sources) do
+		for _, part in ipairs({ "weapon_info", "explosive_info", "melee_info" }) do
+			local list = type(src) == "table" and type(src[part]) == "table" and src[part].hit_status_effects
+			for _, id in ipairs(type(list) == "table" and list or {}) do
+				if type(id) == "string" and not seen[id] and t and t[id] then seen[id] = true out[#out + 1] = id end
+			end
+		end
+	end
+	return out
+end
+
 -- Every row of an item: family headers, then its fields. nil when the game hasn't loaded its data here.
 local function rows_of(item)
 	if item.kind == "preset" then return {} end
@@ -306,7 +355,21 @@ local function rows_of(item)
 			for _, r in ipairs(attachment_rows(item, info)) do out[#out + 1] = r end
 		end
 		for _, name in ipairs(catalog.families_of(st)) do family(name, fields_of(name)) end
-		for _, p in ipairs(projectiles_of(st, item.name)) do family(p.header, fields_of("explosive"), p.item) end
+		local projs = projectiles_of(st, item.name)
+		for _, p in ipairs(projs) do family(p.header, fields_of("explosive"), p.item) end
+		-- Status effects are one table per effect, shared by everything that applies it: the game tracks
+		-- them in a fixed list, so a weapon can't have its own copy.
+		for _, id in ipairs(status_ids(st, projs)) do
+			local shared = {}
+			for _, f in ipairs(catalog.fields("status")) do
+				local c = {}
+				for k, v in pairs(f) do c[k] = v end
+				c.meaning = "Shared: changes this effect for everything that applies it" .. (f.meaning and (". " .. f.meaning) or "")
+				shared[#shared + 1] = c
+			end
+			local name = catalog.text(id)
+			family("Effect: " .. name, shared, { kind = "status", id = id, name = name })
+		end
 	elseif item.kind == "hero" then
 		if edits.value(HELLDIVER, "health_info.health") == nil then return nil end
 		family("character", CHARACTER)
