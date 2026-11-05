@@ -628,6 +628,10 @@ local function settings_rows()
 			function() return S.cfg.bg end, function(v) S.cfg.bg = v end, DEFAULTS.bg),
 		setting("Key hints", "The line of keys at the bottom of the window.", { type = "boolean" },
 			function() return S.cfg.hints end, function(v) S.cfg.hints = v end, DEFAULTS.hints),
+	}
+	-- Under Obsidian Mod Manager (no fgw.update) the open key and the updates are Obsidian's own.
+	if fgw.update then
+		local own = {
 		{ label = "Open key", note = function() return S.capture and "Press a key (Esc: cancel)" or key_label(open_key_name()) end,
 			help = "The key that opens and closes this window. Click Change, then press any key.",
 			f = { type = "action", label = "Open key" }, setting = true, get = function() end, changed = function() return open_key_name() ~= "f7" end,
@@ -647,8 +651,10 @@ local function settings_rows()
 				S.cfg.channel = v
 				check_updates()
 			end, DEFAULTS.channel),
-		{ header = "Tabs" },
-	}
+		}
+		for _, row in ipairs(own) do out[#out + 1] = row end
+	end
+	out[#out + 1] = { header = "Tabs" }
 	for i, tab in ipairs(TABS) do
 		local name = tab[1]
 		if i ~= PRESETS_TAB then out[#out + 1] = setting(name, "Shows the " .. name .. " tab.", { type = "boolean" },
@@ -676,7 +682,7 @@ local function settings_rows()
 	out[#out + 1] = { header = "About" }
 	about("SHODAN HD1 Editor " .. VERSION, "Made by SHODAN", "Thanks for using it.", {})
 	about("GitHub", (GITHUB:gsub("^https://", "")), "Updates, the source, and where to report a problem.",
-		{ { "Open", function() open(GITHUB) end }, { "Copy", function() copy(GITHUB) end } })
+		fgw.open and { { "Open", function() open(GITHUB) end }, { "Copy", function() copy(GITHUB) end } } or { { "Copy", function() copy(GITHUB) end } })
 	local folder = fgw.folder and (fgw.folder:gsub("\\$", ""))
 	if folder then
 		about("Editor folder", folder, "Your kept changes, presets, settings and the log.",

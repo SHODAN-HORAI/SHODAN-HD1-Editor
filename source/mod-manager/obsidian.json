@@ -1,0 +1,18 @@
+{
+  "obsidian": 1,
+  "id": "shodan.stateditor",
+  "version": "0.0.0",
+  "name": { "en": "SHODAN HD1 Editor" },
+  "description": {
+    "en": "Edit the stats of every weapon, grenade, backpack, stratagem, sentry, vehicle, enemy and status effect, and your Helldiver, in one window in the game. Turn each weapon's attachments on and off. Changes apply as you make them and stay for the next launch. Keep setups as presets: 5 per item, and up to 50 named ones for everything you have changed."
+  },
+  "authors": ["SHODAN"],
+  "image": "image.jpg",
+  "source": "https://github.com/SHODAN-HORAI/SHODAN-HD1-Editor",
+  "scope": "session",
+  "entry": "main.lua",
+  "requires": ["obsidian.api"],
+  "keybinds": [
+    { "id": "open", "default": "f7", "label": { "en": "Open the editor" } }
+  ]
+}

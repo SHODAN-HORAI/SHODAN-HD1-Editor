@@ -195,6 +195,13 @@ function Remove($contents) {
 		if (-not (Test-Path $to)) { Copy-Item $f.FullName $to -Force; Write-Host "Put $($f.Name) back (another mod's)." }
 		Remove-Item $f.FullName -Force
 	}
+	# The game stops at the first missing level, so a patch_1 with no patch_0 would never load: close the gaps.
+	$n = 0
+	foreach ($f in (Levels $contents)) {
+		$want = "$Base.patch_$n"
+		if ($f.Name -ne $want) { Move-Item $f.FullName (Join-Path $contents $want); Write-Host "Moved $($f.Name) to $want so the game loads it. If it's a mod manager's, deploy again there." }
+		$n++
+	}
 	Write-Host "SHODAN HD1 Editor is removed. Your saved edits and presets stay in $Folder."
 }
 
